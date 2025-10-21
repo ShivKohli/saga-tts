@@ -80,5 +80,19 @@ app.post("/voices/import", (req, res) => {
   }
 });
 
-// ✅ Export app for Vercel
+// Root route for testing and health checks
+app.get("/", (req, res) => {
+  res.send(`
+    <h2>🧙‍♂️ Saga TTS API is live!</h2>
+    <p>Available endpoints:</p>
+    <ul>
+      <li>POST /tts</li>
+      <li>GET /voices</li>
+      <li>POST /voices/import</li>
+    </ul>
+    <p>Try POSTing to /tts with {"character": "Saga", "text": "Hello"}.</p>
+  `);
+});
+
+// Export app for Vercel
 export default app;
