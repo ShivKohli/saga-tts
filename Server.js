@@ -9,7 +9,7 @@ const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
-const openai = new OpenAI({ apiKey: process.env.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 });
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // 💾 In-memory NPC→voice map
 const knownVoices = {};
