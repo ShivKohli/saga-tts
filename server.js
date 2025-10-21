@@ -88,7 +88,7 @@ app.post("/tts", async (req, res) => {
       })
       .promise();
 
-    const fileUrl = `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${process.env.R2_BUCKET_NAME}/${filename}`;
+    const fileUrl = `https://${process.env.R2_PUBLIC_URL}/${filename}`;
 
     res.json({
       audio_url: fileUrl,
