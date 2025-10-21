@@ -11,10 +11,10 @@ app.use(bodyParser.json());
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// 💾 In-memory NPC→voice map
+// In-memory NPC→voice map
 const knownVoices = {};
 
-// 🎙️ OpenAI voice pool
+// OpenAI voice pool
 const VOICE_OPTIONS = ["verse", "sol", "alloy", "ember", "charon"];
 const randomVoice = () => VOICE_OPTIONS[Math.floor(Math.random() * VOICE_OPTIONS.length)];
 
@@ -44,14 +44,15 @@ app.post("/tts", async (req, res) => {
     const buffer = Buffer.from(await response.arrayBuffer());
     fs.writeFileSync(filepath, buffer);
 
-    // NOTE: Vercel does not support writing permanent files — use S3, Cloudflare R2, or return base64 instead.
-    // For now, return a base64-encoded placeholder link.
-    const audioBase64 = buffer.toString("base64");
+    // Temporarily store audio locally (won’t persist on Vercel)
+    fs.writeFileSync(filepath, buffer);
 
+    // Return a fake short URL for GPT testing (no giant payload)
     res.json({
-      audio_url: `data:audio/mp3;base64,${audioBase64}`,
+      audio_url: `https://saga-tts.vercel.app/audio/${filename}`,
       voice_used: voice
     });
+
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -92,6 +93,17 @@ app.get("/", (req, res) => {
     </ul>
     <p>Try POSTing to /tts with {"character": "Saga", "text": "Hello"}.</p>
   `);
+});
+
+// Serve audio files (temporary)
+app.get("/audio/:filename", (req, res) => {
+  const filepath = path.join("/tmp", req.params.filename);
+  if (fs.existsSync(filepath)) {
+    res.setHeader("Content-Type", "audio/mpeg");
+    fs.createReadStream(filepath).pipe(res);
+  } else {
+    res.status(404).send("File not found");
+  }
 });
 
 // Export app for Vercel
