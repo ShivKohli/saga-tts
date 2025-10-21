@@ -15,7 +15,22 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const knownVoices = {};
 
 // OpenAI voice pool
-const VOICE_OPTIONS = ["verse", "sol", "alloy", "ember", "charon"];
+// 🎙️ Current OpenAI-supported TTS voices
+const VOICE_OPTIONS = [
+  "alloy",
+  "echo",
+  "fable",
+  "onyx",
+  "nova",
+  "shimmer",
+  "coral",
+  "verse",
+  "ballad",
+  "ash",
+  "sage",
+  "marin",
+  "cedar"
+];
 const randomVoice = () => VOICE_OPTIONS[Math.floor(Math.random() * VOICE_OPTIONS.length)];
 
 /**
