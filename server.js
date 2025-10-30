@@ -1,4 +1,4 @@
-// server.js  — Saga TTS API (Vercel + Cloudflare R2 + OpenAI TTS)
+// server.js — Saga TTS API (Vercel + Cloudflare R2 + OpenAI TTS)
 
 import express from "express";
 import bodyParser from "body-parser";
@@ -6,16 +6,17 @@ import OpenAI from "openai";
 import AWS from "aws-sdk";
 import cors from "cors";
 
-// ──────────────────────────────────────────────────────────────
-//  Setup
-// ──────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────
+// Setup
+// ───────────────────────────────────────────────
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
+// OpenAI client (uses gpt-4o-mini-tts for audio)
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// R2 connection
+// Cloudflare R2 setup
 const r2 = new AWS.S3({
   endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
   accessKeyId: process.env.R2_ACCESS_KEY_ID,
@@ -23,19 +24,22 @@ const r2 = new AWS.S3({
   signatureVersion: "v4",
 });
 
-// ──────────────────────────────────────────────────────────────
-//  Voice memory & helpers
-// ──────────────────────────────────────────────────────────────
-const knownVoices = {}; // Ephemeral voice assignments per session
+// ───────────────────────────────────────────────
+// Voice Memory & Helpers
+// ───────────────────────────────────────────────
+const knownVoices = {}; // Temporary session mapping for characters
 const VOICE_OPTIONS = [
-  "alloy", "echo", "fable", "onyx", "nova", "shimmer",
-  "coral", "verse", "ballad", "ash", "sage", "marin", "cedar"
+  "alloy", "ash", "ballad", "coral", "echo",
+  "fable", "marin", "nova", "onyx", "sage",
+  "shimmer", "verse", "cedar"
 ];
+
+// Randomly assign a valid OpenAI voice (for NPCs)
 const randomVoice = () => VOICE_OPTIONS[Math.floor(Math.random() * VOICE_OPTIONS.length)];
 
-// ──────────────────────────────────────────────────────────────
-//  Routes
-// ──────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────
+// Routes
+// ───────────────────────────────────────────────
 
 // Health check
 app.get("/", (req, res) => {
@@ -43,9 +47,9 @@ app.get("/", (req, res) => {
     <h2>🧙‍♂️ Saga TTS API is live!</h2>
     <p>Available endpoints:</p>
     <ul>
-      <li>POST /tts</li>
-      <li>GET /voices</li>
-      <li>POST /voices/import</li>
+      <li>POST /tts — Generate TTS audio</li>
+      <li>GET /voices — View current voice mapping</li>
+      <li>POST /voices/import — Import saved voice mapping</li>
     </ul>
   `);
 });
@@ -54,20 +58,25 @@ app.get("/", (req, res) => {
 app.post("/tts", async (req, res) => {
   try {
     const { character, text } = req.body;
-    if (!character || !text)
-      return res.status(400).json({ error: "Missing character or text field." });
 
-    // assign or reuse voice
+    if (!character || !text) {
+      return res.status(400).json({ error: "Missing 'character' or 'text' field." });
+    }
+
+    // Assign or reuse voice
     if (!knownVoices[character]) {
       if (character.toLowerCase() === "saga") {
-        knownVoices[character] = "verse"; // narrator fixed
+        knownVoices[character] = "verse"; // ✅ fixed narrator voice
       } else {
-        knownVoices[character] = randomVoice();
+        knownVoices[character] = randomVoice(); // random for NPCs
       }
     }
+
     const voice = knownVoices[character];
 
-    // call OpenAI TTS
+    console.log(`🎙️ Generating voice for [${character}] → "${voice}"`);
+
+    // Generate TTS via OpenAI
     const response = await openai.audio.speech.create({
       model: "gpt-4o-mini-tts",
       voice,
@@ -77,7 +86,7 @@ app.post("/tts", async (req, res) => {
     const buffer = Buffer.from(await response.arrayBuffer());
     const filename = `tts_${Date.now()}_${character.replace(/\s+/g, "_")}.mp3`;
 
-    // upload to Cloudflare R2
+    // Upload to Cloudflare R2
     await r2
       .putObject({
         Bucket: process.env.R2_BUCKET_NAME,
@@ -90,29 +99,32 @@ app.post("/tts", async (req, res) => {
 
     const fileUrl = `https://${process.env.R2_PUBLIC_URL}/${filename}`;
 
+    console.log(`✅ Uploaded to R2: ${fileUrl}`);
+
     res.json({
       audio_url: fileUrl,
       voice_used: voice,
     });
   } catch (err) {
-    console.error("TTS error:", err);
-    res.status(500).json({ error: err.message });
+    console.error("💥 TTS error:", err);
+    res.status(500).json({ error: err.message ?? "TTS generation failed." });
   }
 });
 
-// Export current voice mapping
+// Export current voice mappings (for session restore)
 app.get("/voices", (req, res) => {
   res.json({ voices: knownVoices });
 });
 
-// Import previously saved mapping
+// Import previously saved voice mappings
 app.post("/voices/import", (req, res) => {
   const { voices } = req.body;
   if (voices && typeof voices === "object") {
     Object.assign(knownVoices, voices);
+    console.log("🔄 Imported voice mappings:", voices);
     res.json({ message: "Voices imported successfully", voices: knownVoices });
   } else {
-    res.status(400).json({ error: "Invalid voice mapping" });
+    res.status(400).json({ error: "Invalid voice mapping payload." });
   }
 });
 
