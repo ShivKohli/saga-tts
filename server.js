@@ -66,7 +66,7 @@ app.post("/tts", async (req, res) => {
     // Assign or reuse voice
     if (!knownVoices[character]) {
       if (character.toLowerCase() === "saga") {
-        knownVoices[character] = "verse"; // ✅ fixed narrator voice
+        knownVoices[character] = "fable"; // ✅ fixed narrator voice
       } else {
         knownVoices[character] = randomVoice(); // random for NPCs
       }
