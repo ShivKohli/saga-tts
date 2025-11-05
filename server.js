@@ -27,7 +27,6 @@ const knownVoices = {};
 const FIXED_VOICES = {
   saga: "fable",
   narrator: "onyx",
-  npc_default: "nova",
 };
 
 const VOICE_OPTIONS = [
