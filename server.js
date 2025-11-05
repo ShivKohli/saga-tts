@@ -1,5 +1,4 @@
 // server.js — Saga TTS API (Vercel + Cloudflare R2 + OpenAI TTS)
-// /server.js — Saga TTS API
 
 import express from "express";
 import bodyParser from "body-parser";
@@ -22,21 +21,16 @@ const r2 = new AWS.S3({
 });
 
 // ───────────────────────────────────────────────
-// Voice setup
+// Voice setup and mappings
 // ───────────────────────────────────────────────
-const knownVoices = {};
+const knownVoices = {}; // runtime cache of { character: voice }
 const FIXED_VOICES = {
   saga: "fable",
   narrator: "fable",
 };
 
-const VOICE_OPTIONS = [
-  "alloy", "ash", "ballad", "coral", "echo",
-  "fable", "marin", "nova", "onyx", "sage",
-  "shimmer", "verse", "cedar"
-];
-
-const randomVoice = () => VOICE_OPTIONS[Math.floor(Math.random() * VOICE_OPTIONS.length)];
+// Default fallback if voice detection somehow fails
+const DEFAULT_VOICE = "echo";
 
 // ───────────────────────────────────────────────
 // Routes
@@ -47,7 +41,7 @@ app.get("/", (req, res) => {
 
 app.post("/tts", async (req, res) => {
   try {
-    const { character, text, voice: requestedVoice } = req.body;
+    const { character, text, description, voice: requestedVoice } = req.body;
 
     if (!character || !text) {
       return res.status(400).json({ error: "Missing 'character' or 'text' field." });
@@ -55,20 +49,31 @@ app.post("/tts", async (req, res) => {
 
     const charKey = character.toLowerCase().trim();
 
-    // ✅ Use requested voice if provided
-    if (!knownVoices[character]) {
-      if (charKey === "saga") knownVoices[character] = FIXED_VOICES.saga;
-      else if (charKey === "narrator") knownVoices[character] = FIXED_VOICES.narrator;
-      else knownVoices[character] = FIXED_VOICES.npc_default;
+    // ── Step 1: Fixed voices for Saga/narrator ─────────────────────────────
+    if (charKey === "saga") {
+      knownVoices[character] = FIXED_VOICES.saga;
+    } else if (charKey === "narrator") {
+      knownVoices[character] = FIXED_VOICES.narrator;
     }
 
-    const voice = requestedVoice || knownVoices[character];
-    console.log(`🎙️ Generating voice for [${character}] using "${voice}"...`);
+    // ── Step 2: Determine or assign a voice ────────────────────────────────
+    let finalVoice = requestedVoice || knownVoices[character];
 
-    // ✅ Generate TTS
+    if (!finalVoice) {
+      // New NPC or no previous voice found → use gender-aware assignment
+      const { gender, voice } = assignVoice(character, description || text);
+      knownVoices[character] = voice;
+      finalVoice = voice;
+
+      console.log(`🧩 Assigned ${character} (${gender}) → "${voice}"`);
+    }
+
+    console.log(`🎙️ Generating voice for [${character}] using "${finalVoice}"...`);
+
+    // ── Step 3: Generate speech via OpenAI ────────────────────────────────
     const response = await openai.audio.speech.create({
       model: "gpt-4o-mini-tts",
-      voice,
+      voice: finalVoice,
       input: text,
     });
 
@@ -80,9 +85,10 @@ app.post("/tts", async (req, res) => {
     }
 
     const buffer = Buffer.from(arrayBuffer);
-    const filename = `tts_${Date.now()}_${character.replace(/\s+/g, "_")}.mp3`;
+    const safeName = character.replace(/\s+/g, "_").replace(/[^\w_-]/g, "");
+    const filename = `tts_${Date.now()}_${safeName}.mp3`;
 
-    // ✅ Upload to Cloudflare R2
+    // ── Step 4: Upload to Cloudflare R2 ────────────────────────────────────
     await r2
       .putObject({
         Bucket: process.env.R2_BUCKET_NAME,
@@ -96,9 +102,11 @@ app.post("/tts", async (req, res) => {
     const fileUrl = `https://${process.env.R2_PUBLIC_URL}/${filename}`;
     console.log(`✅ Uploaded to R2: ${fileUrl}`);
 
+    // ── Step 5: Respond with info ─────────────────────────────────────────
     res.json({
       audio_url: fileUrl,
-      voice_used: voice,
+      voice_used: finalVoice,
+      character,
     });
   } catch (err) {
     console.error("💥 TTS error:", err);
@@ -106,7 +114,9 @@ app.post("/tts", async (req, res) => {
   }
 });
 
-// Export mappings
+// ───────────────────────────────────────────────
+// Voice mapping endpoints
+// ───────────────────────────────────────────────
 app.get("/voices", (req, res) => res.json({ voices: knownVoices }));
 
 app.post("/voices/import", (req, res) => {
