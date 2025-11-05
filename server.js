@@ -28,13 +28,22 @@ const r2 = new AWS.S3({
 // Voice Memory & Helpers
 // ───────────────────────────────────────────────
 const knownVoices = {}; // Temporary session mapping for characters
+
+// ✅ Centralized list of available OpenAI TTS voices
 const VOICE_OPTIONS = [
   "alloy", "ash", "ballad", "coral", "echo",
   "fable", "marin", "nova", "onyx", "sage",
   "shimmer", "verse", "cedar"
 ];
 
-// Randomly assign a valid OpenAI voice (for NPCs)
+// ✅ Fixed core voices (keep stable across sessions)
+const FIXED_VOICES = {
+  saga: "fable",          // female DM voice
+  narrator: "onyx",       // male narrator voice (deep)
+  npc_default: "nova",    // neutral NPC fallback
+};
+
+// Randomly assign a valid OpenAI voice (for miscellaneous NPCs)
 const randomVoice = () => VOICE_OPTIONS[Math.floor(Math.random() * VOICE_OPTIONS.length)];
 
 // ───────────────────────────────────────────────
@@ -57,22 +66,27 @@ app.get("/", (req, res) => {
 // Generate speech
 app.post("/tts", async (req, res) => {
   try {
-    const { character, text } = req.body;
+    const { character, text, voice: requestedVoice } = req.body;
 
     if (!character || !text) {
       return res.status(400).json({ error: "Missing 'character' or 'text' field." });
     }
 
-    // Assign or reuse voice
+    const charKey = character.toLowerCase().trim();
+
+    // ✅ Determine which voice to use (fixed logic)
     if (!knownVoices[character]) {
-      if (character.toLowerCase() === "saga") {
-        knownVoices[character] = "fable"; // ✅ fixed narrator voice
+      if (charKey === "saga") {
+        knownVoices[character] = FIXED_VOICES.saga;
+      } else if (charKey === "narrator") {
+        knownVoices[character] = FIXED_VOICES.narrator;
       } else {
-        knownVoices[character] = randomVoice(); // random for NPCs
+        // Default for dynamically created NPCs
+        knownVoices[character] = FIXED_VOICES.npc_default;
       }
     }
 
-    const voice = knownVoices[character];
+    const voice = requestedVoice || knownVoices[character];
 
     console.log(`🎙️ Generating voice for [${character}] → "${voice}"`);
 
