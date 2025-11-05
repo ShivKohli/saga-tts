@@ -6,6 +6,7 @@ import bodyParser from "body-parser";
 import OpenAI from "openai";
 import AWS from "aws-sdk";
 import cors from "cors";
+import { assignVoice } from "./utils/voiceAssigner.js";
 
 const app = express();
 app.use(cors());
