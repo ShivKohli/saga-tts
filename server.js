@@ -1,4 +1,5 @@
 // server.js — Saga TTS API (Vercel + Cloudflare R2 + OpenAI TTS)
+// /server.js — Saga TTS API
 
 import express from "express";
 import bodyParser from "body-parser";
@@ -6,17 +7,12 @@ import OpenAI from "openai";
 import AWS from "aws-sdk";
 import cors from "cors";
 
-// ───────────────────────────────────────────────
-// Setup
-// ───────────────────────────────────────────────
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
-// OpenAI client (uses gpt-4o-mini-tts for audio)
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// Cloudflare R2 setup
 const r2 = new AWS.S3({
   endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
   accessKeyId: process.env.R2_ACCESS_KEY_ID,
@@ -25,45 +21,30 @@ const r2 = new AWS.S3({
 });
 
 // ───────────────────────────────────────────────
-// Voice Memory & Helpers
+// Voice setup
 // ───────────────────────────────────────────────
-const knownVoices = {}; // Temporary session mapping for characters
+const knownVoices = {};
+const FIXED_VOICES = {
+  saga: "fable",
+  narrator: "onyx",
+  npc_default: "nova",
+};
 
-// ✅ Centralized list of available OpenAI TTS voices
 const VOICE_OPTIONS = [
   "alloy", "ash", "ballad", "coral", "echo",
   "fable", "marin", "nova", "onyx", "sage",
   "shimmer", "verse", "cedar"
 ];
 
-// ✅ Fixed core voices (keep stable across sessions)
-const FIXED_VOICES = {
-  saga: "fable",          // female DM voice
-  narrator: "onyx",       // male narrator voice (deep)
-  npc_default: "nova",    // neutral NPC fallback
-};
-
-// Randomly assign a valid OpenAI voice (for miscellaneous NPCs)
 const randomVoice = () => VOICE_OPTIONS[Math.floor(Math.random() * VOICE_OPTIONS.length)];
 
 // ───────────────────────────────────────────────
 // Routes
 // ───────────────────────────────────────────────
-
-// Health check
 app.get("/", (req, res) => {
-  res.send(`
-    <h2>🧙‍♂️ Saga TTS API is live!</h2>
-    <p>Available endpoints:</p>
-    <ul>
-      <li>POST /tts — Generate TTS audio</li>
-      <li>GET /voices — View current voice mapping</li>
-      <li>POST /voices/import — Import saved voice mapping</li>
-    </ul>
-  `);
+  res.send(`<h2>🧙‍♂️ Saga TTS API is live!</h2>`);
 });
 
-// Generate speech
 app.post("/tts", async (req, res) => {
   try {
     const { character, text, voice: requestedVoice } = req.body;
@@ -74,33 +55,34 @@ app.post("/tts", async (req, res) => {
 
     const charKey = character.toLowerCase().trim();
 
-    // ✅ Determine which voice to use (fixed logic)
+    // ✅ Use requested voice if provided
     if (!knownVoices[character]) {
-      if (charKey === "saga") {
-        knownVoices[character] = FIXED_VOICES.saga;
-      } else if (charKey === "narrator") {
-        knownVoices[character] = FIXED_VOICES.narrator;
-      } else {
-        // Default for dynamically created NPCs
-        knownVoices[character] = FIXED_VOICES.npc_default;
-      }
+      if (charKey === "saga") knownVoices[character] = FIXED_VOICES.saga;
+      else if (charKey === "narrator") knownVoices[character] = FIXED_VOICES.narrator;
+      else knownVoices[character] = FIXED_VOICES.npc_default;
     }
 
     const voice = requestedVoice || knownVoices[character];
+    console.log(`🎙️ Generating voice for [${character}] using "${voice}"...`);
 
-    console.log(`🎙️ Generating voice for [${character}] → "${voice}"`);
-
-    // Generate TTS via OpenAI
+    // ✅ Generate TTS
     const response = await openai.audio.speech.create({
       model: "gpt-4o-mini-tts",
       voice,
       input: text,
     });
 
-    const buffer = Buffer.from(await response.arrayBuffer());
+    // Safety check
+    const arrayBuffer = await response.arrayBuffer();
+    if (!arrayBuffer || arrayBuffer.byteLength === 0) {
+      console.error("⚠️ Empty audio buffer received from OpenAI.");
+      return res.status(500).json({ error: "OpenAI returned empty audio." });
+    }
+
+    const buffer = Buffer.from(arrayBuffer);
     const filename = `tts_${Date.now()}_${character.replace(/\s+/g, "_")}.mp3`;
 
-    // Upload to Cloudflare R2
+    // ✅ Upload to Cloudflare R2
     await r2
       .putObject({
         Bucket: process.env.R2_BUCKET_NAME,
@@ -112,7 +94,6 @@ app.post("/tts", async (req, res) => {
       .promise();
 
     const fileUrl = `https://${process.env.R2_PUBLIC_URL}/${filename}`;
-
     console.log(`✅ Uploaded to R2: ${fileUrl}`);
 
     res.json({
@@ -125,12 +106,9 @@ app.post("/tts", async (req, res) => {
   }
 });
 
-// Export current voice mappings (for session restore)
-app.get("/voices", (req, res) => {
-  res.json({ voices: knownVoices });
-});
+// Export mappings
+app.get("/voices", (req, res) => res.json({ voices: knownVoices }));
 
-// Import previously saved voice mappings
 app.post("/voices/import", (req, res) => {
   const { voices } = req.body;
   if (voices && typeof voices === "object") {
@@ -142,5 +120,4 @@ app.post("/voices/import", (req, res) => {
   }
 });
 
-// Export for Vercel serverless
 export default app;
