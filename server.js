@@ -26,6 +26,7 @@ const r2 = new AWS.S3({
 const knownVoices = {};
 const FIXED_VOICES = {
   saga: "fable",
+  narrator: "onyx",
 };
 
 const VOICE_OPTIONS = [
